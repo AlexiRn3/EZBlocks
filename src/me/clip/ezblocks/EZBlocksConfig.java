@@ -85,12 +85,15 @@ public class EZBlocksConfig {
 		c.addDefault("blocks_broken_command_enabled", true);
 		c.addDefault("blocks_broken_message", "&bYou have broken &e%blocksbroken%&b blocks!");
 		c.addDefault("material_blacklist",
-				Arrays.asList(new String[] { "DIRT",
-						"GRASS" }));
+				Arrays.asList(new String[] { "DIRT", "GRASS", "GRASS_BLOCK" }));
 		c.addDefault("blacklist_is_whitelist", false);
 		c.addDefault("tracked_tools",
-				Arrays.asList(new String[] { "WOOD_PICKAXE", "STONE_PICKAXE", "IRON_PICKAXE", "GOLD_PICKAXE",
-						"DIAMOND_PICKAXE" }));
+				Arrays.asList(new String[] {
+						// 1.13+ canonical names
+						"WOODEN_PICKAXE", "STONE_PICKAXE", "IRON_PICKAXE",
+						"GOLDEN_PICKAXE", "DIAMOND_PICKAXE", "NETHERITE_PICKAXE",
+						// Legacy names kept for backwards compatibility on older servers
+						"WOOD_PICKAXE", "GOLD_PICKAXE" }));
 		c.options().copyDefaults(true);
 		plugin.saveConfig();
 		plugin.reloadConfig();

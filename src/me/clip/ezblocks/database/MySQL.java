@@ -6,21 +6,20 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-
-import org.bukkit.Bukkit;
+import java.util.logging.Logger;
 
 /**
- * MySQL
- * 
  * MySQL Database.
  * @author Maximvdw
  */
 public class MySQL extends Database {
-	private String hostname = "localhost"; // MySQL Hostname
-	private String portnmbr = "3306"; // MySQL port
-	private String username = "minecraft"; // MySQL username
-	private String password = ""; // MySQL password
-	private String database = "minecraft"; // MySQL database
+	private static final Logger LOG = Logger.getLogger("EZBlocks");
+
+	private String hostname = "localhost";
+	private String portnmbr = "3306";
+	private String username = "minecraft";
+	private String password = "";
+	private String database = "minecraft";
 
 	public MySQL(String prefix, String hostname, String portnmbr,
 			String database, String username, String password) {
@@ -33,21 +32,25 @@ public class MySQL extends Database {
 	}
 
 	protected boolean initialize() {
+		// Try modern (8.x) driver first, fall back to legacy
 		try {
-			Class.forName("com.mysql.jdbc.Driver"); // Check that server's Java
-													// has MySQL support.
+			Class.forName("com.mysql.cj.jdbc.Driver");
+			return true;
+		} catch (ClassNotFoundException ignored) {
+			// fall through
+		}
+		try {
+			Class.forName("com.mysql.jdbc.Driver");
 			return true;
 		} catch (ClassNotFoundException e) {
-			Bukkit.getLogger().severe(
-					"[EZBlocks] " + "Class Not Found Exception: "
-							+ e.getMessage() + ".");
+			LOG.severe("[EZBlocks] No MySQL JDBC driver found on the classpath.");
 			return false;
 		}
 	}
 
 	public Connection open() {
 		this.open(true);
-		return null;
+		return this.connection;
 	}
 
 	public Connection open(boolean showError) {
@@ -55,7 +58,8 @@ public class MySQL extends Database {
 			String url = "";
 			try {
 				url = "jdbc:mysql://" + this.hostname + ":" + this.portnmbr
-						+ "/" + this.database + "?allowReconnect=true";
+						+ "/" + this.database
+						+ "?useSSL=false&autoReconnect=true&useUnicode=true&characterEncoding=utf8";
 				this.connection = DriverManager.getConnection(url,
 						this.username, this.password);
 				if (checkConnection())
@@ -63,33 +67,26 @@ public class MySQL extends Database {
 				return this.connection;
 			} catch (SQLException e) {
 				if (showError) {
-					Bukkit.getLogger().severe("[EZBlocks] " + url);
-					Bukkit.getLogger()
-							.severe("[EZBlocks] "
-									+ "Could not be resolved because of an SQL Exception: "
-									+ e.getMessage() + ".");
+					LOG.severe("[EZBlocks] " + url);
+					LOG.severe("[EZBlocks] Could not connect: " + e.getMessage());
 				}
 			} catch (Exception e) {
-				e.printStackTrace();
+				LOG.severe("[EZBlocks] Unexpected error opening MySQL connection: " + e.getMessage());
 			}
 		}
 		return null;
 	}
 
 	public void close() {
-		// Connection connection = open();
 		try {
 			if (connection != null)
 				connection.close();
 		} catch (Exception e) {
-			Bukkit.getLogger().severe(
-					"[EZBlocks] " + "Failed to close database connection: "
-							+ e.getMessage());
+			LOG.severe("[EZBlocks] Failed to close database connection: " + e.getMessage());
 		}
 	}
 
 	public Connection getConnection() {
-		// Create connection if closed or null
 		if (this.connection == null)
 			return open();
 		try {
@@ -97,95 +94,60 @@ public class MySQL extends Database {
 				return open();
 			}
 		} catch (SQLException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+			LOG.severe("[EZBlocks] Could not check connection state: " + e.getMessage());
 		}
 		return this.connection;
 	}
 
 	public boolean checkConnection() {
-		if (connection != null)
-			return true;
-		return false;
+		return connection != null;
 	}
 
 	public ResultSet query(String query) {
-		// Connection connection = null;
 		Statement statement = null;
-		ResultSet result = null/* new JdbcRowSetImpl() */;
+		ResultSet result = null;
 		try {
-			// connection = open();
-			// if (checkConnection())
-			for (int counter = 0; counter < 5 && result == null; counter++) {
-				try {
-					statement = this.connection.createStatement();
-					result = statement.executeQuery("SELECT CURTIME()");
-				} catch (SQLException e) {
-					if (counter == 4) {
-						throw e;
-					} else {
-						if (e.getMessage().contains("connection closed")) {
-							Bukkit.getLogger()
-									.severe("[EZBlocks] "
-											+ "Error in SQL query. Attempting to reestablish connection. Attempt #"
-											+ Integer.toString(counter + 1)
-											+ "!");
-							this.open(false);
-						} else {
-							throw e;
-						}
-					}
-				}
-			}
+			statement = getConnection().createStatement();
 
 			switch (getStatement(query)) {
 			case SELECT:
 				result = statement.executeQuery(query);
 				break;
-
 			default:
 				statement.executeUpdate(query);
 			}
 			return result;
 		} catch (SQLException e) {
-			Bukkit.getLogger().severe(
-					"[EZBlocks] " + "Error in SQL query: " + e.getMessage());
+			LOG.severe("[EZBlocks] Error in SQL query: " + e.getMessage());
 		}
 		return result;
 	}
 
 	public PreparedStatement prepare(String query) {
-		PreparedStatement ps = null;
 		try {
-			ps = connection.prepareStatement(query);
-			return ps;
+			return getConnection().prepareStatement(query);
 		} catch (SQLException e) {
 			if (!e.toString().contains("not return ResultSet"))
-				Bukkit.getLogger().severe(
-						"[EZBlocks] " + "Error in SQL prepare() query: "
-								+ e.getMessage());
+				LOG.severe("[EZBlocks] Error in SQL prepare() query: " + e.getMessage());
 		}
-		return ps;
+		return null;
 	}
 
 	public boolean createTable(String query) {
 		Statement statement = null;
 		try {
-			if (query.equals("") || query == null) {
-				Bukkit.getLogger().severe(
-						"[EZBlocks] " + "SQL query empty: createTable(" + query
-								+ ")");
+			if (query == null || query.isEmpty()) {
+				LOG.severe("[EZBlocks] SQL query empty: createTable(" + query + ")");
 				return false;
 			}
-
-			statement = connection.createStatement();
+			statement = getConnection().createStatement();
 			statement.execute(query);
 			return true;
 		} catch (SQLException e) {
-			Bukkit.getLogger().severe("[EZBlocks] " + e.getMessage());
+			LOG.severe("[EZBlocks] " + e.getMessage());
 			return false;
 		} catch (Exception e) {
-			Bukkit.getLogger().severe("[EZBlocks] " + e.getMessage());
+			LOG.severe("[EZBlocks] " + e.getMessage());
 			return false;
 		}
 	}
@@ -193,26 +155,15 @@ public class MySQL extends Database {
 	public boolean checkTable(String table) {
 		try {
 			Statement statement = getConnection().createStatement();
-
-			ResultSet result = statement.executeQuery("SELECT * FROM " + table);
-
-			if (result == null)
-				return false;
-			if (result != null)
-				return true;
+			ResultSet result = statement.executeQuery("SELECT 1 FROM `" + table + "` LIMIT 1");
+			return result != null;
 		} catch (SQLException e) {
-			if (e.getMessage().contains("exist")) {
+			if (e.getMessage() != null && e.getMessage().toLowerCase().contains("exist")) {
 				return false;
-			} else {
-				Bukkit.getLogger()
-						.severe("[EZBlocks] " + "Error in SQL query: "
-								+ e.getMessage());
 			}
+			LOG.severe("[EZBlocks] Error in SQL query: " + e.getMessage());
+			return false;
 		}
-
-		if (query("SELECT * FROM " + table) == null)
-			return true;
-		return false;
 	}
 
 	public boolean wipeTable(String table) {
@@ -220,15 +171,12 @@ public class MySQL extends Database {
 		String query = null;
 		try {
 			if (!this.checkTable(table)) {
-				Bukkit.getLogger().severe(
-						"[EZBlocks] " + "Error wiping table: \"" + table
-								+ "\" does not exist.");
+				LOG.severe("[EZBlocks] Error wiping table: \"" + table + "\" does not exist.");
 				return false;
 			}
 			statement = getConnection().createStatement();
-			query = "DELETE FROM " + table + ";";
+			query = "DELETE FROM `" + table + "`";
 			statement.executeUpdate(query);
-
 			return true;
 		} catch (SQLException e) {
 			if (!e.toString().contains("not return ResultSet"))
@@ -241,11 +189,11 @@ public class MySQL extends Database {
 	public String getCreateStatement(String table) {
 		if (checkTable(table)) {
 			try {
-				ResultSet result = query("SHOW CREATE TABLE " + table);
-				result.next();
-				return result.getString(2);
-			} catch (Exception ex) {
-
+				ResultSet result = query("SHOW CREATE TABLE `" + table + "`");
+				if (result != null && result.next()) {
+					return result.getString(2);
+				}
+			} catch (Exception ignored) {
 			}
 		}
 		return "";

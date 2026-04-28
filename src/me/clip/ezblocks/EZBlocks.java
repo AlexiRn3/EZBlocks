@@ -1,22 +1,20 @@
 package me.clip.ezblocks;
 
-import java.util.Iterator;
-import java.util.Set;
+import java.util.Map;
 
 import me.clip.ezblocks.database.Database;
 import me.clip.ezblocks.database.MySQL;
 import me.clip.ezblocks.listeners.AutoSellListener;
-import me.clip.ezblocks.listeners.BreakListenerHigh;
-import me.clip.ezblocks.listeners.BreakListenerHighest;
-import me.clip.ezblocks.listeners.BreakListenerLow;
-import me.clip.ezblocks.listeners.BreakListenerLowest;
-import me.clip.ezblocks.listeners.BreakListenerMonitor;
-import me.clip.ezblocks.listeners.BreakListenerNormal;
+import me.clip.ezblocks.listeners.BreakListener;
 import me.clip.ezblocks.listeners.TEListener;
 import me.clip.ezblocks.tasks.IntervalSaveTask;
 
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.server.PluginEnableEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
 
@@ -31,12 +29,14 @@ public class EZBlocks extends JavaPlugin {
 	protected static BlockOptions options;
 
 	protected static int saveInterval;
-	
+
 	protected static BukkitTask savetask;
 
 	private static EZBlocks ezblocks;
 
 	public static Database database = null;
+
+	private boolean tokenEnchantHooked = false;
 
 	@Override
 	public void onEnable() {
@@ -44,35 +44,62 @@ public class EZBlocks extends JavaPlugin {
 		ezblocks = this;
 
 		config.loadConfigurationFile();
-		
+
 		loadOptions();
 
 		initDb();
-		
+
 		breakHandler = new BreakHandler(this);
 
 		Bukkit.getServer().getPluginManager().registerEvents(breakHandler, this);
-		
+
 		registerBlockBreakListener();
-		
+
 		startSaveTask();
-		
+
 		getCommand("blocks").setExecutor(commands);
-		
+
 		getLogger().info(config.loadGlobalRewards() + " global rewards loaded!");
-		
+
 		getLogger().info(config.loadIntervalRewards() + " interval rewards loaded!");
-		
+
 		getLogger().info(config.loadPickaxeGlobalRewards() + " global pickaxe rewards loaded!");
-		
+
 		getLogger().info(config.loadPickaxeIntervalRewards() + " interval pickaxe rewards loaded!");
-		
-		if (Bukkit.getPluginManager().isPluginEnabled("TokenEnchant") && config.hookTokenEnchant()) {
-			new TEListener(this);
-			getLogger().info("Hooked into TokenEnchant for TEBlockExplodeEvent listener");
+
+		tryHookTokenEnchant();
+
+		// Late-loading TokenEnchant safety net (in case it loads after us)
+		Bukkit.getPluginManager().registerEvents(new Listener() {
+			@EventHandler(priority = EventPriority.MONITOR)
+			public void onPluginEnable(PluginEnableEvent e) {
+				if ("TokenEnchant".equalsIgnoreCase(e.getPlugin().getName())) {
+					tryHookTokenEnchant();
+				}
+			}
+		}, this);
+	}
+
+	private void tryHookTokenEnchant() {
+		if (tokenEnchantHooked) {
+			return;
+		}
+		if (!Bukkit.getPluginManager().isPluginEnabled("TokenEnchant")) {
+			return;
+		}
+		if (!config.hookTokenEnchant()) {
+			getLogger().info("TokenEnchant is present but 'hooks.tokenenchant.count_exploded_blocks' is disabled in config.");
+			return;
+		}
+		boolean ok = TEListener.tryRegister(this);
+		if (ok) {
+			tokenEnchantHooked = true;
+			getLogger().info("Hooked into TokenEnchant for explosion-based block tracking.");
+		} else {
+			getLogger().warning("TokenEnchant detected but its event class could not be located. Exploded blocks will NOT be counted. Please report your TokenEnchant version.");
 		}
 	}
-	
+
 	private void initDb() {
 		if (!getConfig().getBoolean("database.enabled")) {
 			playerconfig.reload();
@@ -89,19 +116,20 @@ public class EZBlocks extends JavaPlugin {
 								.getString("database.username"), getConfig()
 								.getString("database.password"));
 				database.open();
-				// Check if table exists
-				if (!database.checkTable("playerblocks")) {
-					// Create table
-					getLogger().info("Creating MySQL table ...");
-					
+
+				String table = database.getTablePrefix() + "playerblocks";
+				if (!database.checkTable(table)) {
+					getLogger().info("Creating MySQL table " + table + " ...");
+
 					database.createTable("CREATE TABLE IF NOT EXISTS `"
-							+ database.getTablePrefix() + "data` ("
+							+ table + "` ("
 							+ "  `uuid` varchar(50) NOT NULL,"
-							+ "  `blocks` integer NOT NULL,"
+							+ "  `blocksmined` integer NOT NULL,"
 							+ "  PRIMARY KEY (`uuid`)"
-							+ ") ENGINE=InnoDB DEFAULT CHARSET=latin1;");
+							+ ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
 				}
 			} catch (Exception ex) {
+				getLogger().severe("Database init failed: " + ex.getMessage());
 				ex.printStackTrace();
 				getLogger().severe("Falling back to flatfiles ...");
 				database = null;
@@ -147,80 +175,41 @@ public class EZBlocks extends JavaPlugin {
 	public void onDisable() {
 		stopSaveTask();
 		if (BreakHandler.breaks != null) {
-			Set<String> save = BreakHandler.breaks.keySet();
-		
-			Iterator<String> si = save.iterator();
-		
-			while (si.hasNext()) {
-				
-				String uuid = si.next();
-				
-				int broken = BreakHandler.breaks.get(uuid);
-				
-				playerconfig.savePlayer(uuid, broken);	
-				
+			int count = 0;
+			for (Map.Entry<String, Integer> entry : BreakHandler.breaks.entrySet()) {
+				playerconfig.savePlayer(entry.getKey(), entry.getValue());
+				count++;
 			}
-		
-			System.out.println("[EZBlocks] "+save.size()+" players saved!");
-			save = null;
+			getLogger().info(count + " players saved!");
+			BreakHandler.breaks.clear();
 		}
-		
-		RewardHandler.globalRewards = null;
+
 		ezblocks = null;
 	}
 
 	protected void registerBlockBreakListener() {
-		
+
 		if (config.useAutoSellEvents() && Bukkit.getPluginManager().getPlugin("AutoSell") != null) {
 			getLogger().info("Using AutoSell events for block break and sell detection...");
-			new AutoSellListener(this);
+			AutoSellListener.tryRegister(this);
 			return;
-		} else {
-			getLogger().info("Failed to detect AutoSell. Defaulting to bukkit event listeners...");
 		}
-		//register break listener
-		String priority = config.getListenerPriority();
-		
-		if (priority.equalsIgnoreCase("lowest")) {
-			getLogger().info("BlockBreakEvent listener registered on LOWEST");
-			new BreakListenerLowest(this); 
-		} else if (priority.equalsIgnoreCase("low")) {
-			getLogger().info("BlockBreakEvent listener registered on LOW");
-			new BreakListenerLow(this);
-		} else if (priority.equalsIgnoreCase("normal")) {
-			getLogger().info("BlockBreakEvent listener registered on NORMAL");
-			new BreakListenerNormal(this);
-		} else if (priority.equalsIgnoreCase("high")) {
-			getLogger().info("BlockBreakEvent listener registered on HIGH");
-			new BreakListenerHigh(this);
-		} else if (priority.equalsIgnoreCase("highest")) {
-			getLogger().info("BlockBreakEvent listener registered on HIGHEST");
-			new BreakListenerHighest(this);
-		} else if (priority.equalsIgnoreCase("monitor")) {
-			getLogger().info("BlockBreakEvent listener registered on MONITOR");
-			new BreakListenerMonitor(this);
-		} else {
-			getLogger().info("BlockBreakEvent listener registered on HIGHEST");
-			new BreakListenerHighest(this);
-		}
+		getLogger().info("AutoSell not detected (or disabled in config). Using bukkit BlockBreakEvent listener...");
+
+		EventPriority priority = BreakListener.parsePriority(config.getListenerPriority());
+		new BreakListener(this, priority);
+		getLogger().info("BlockBreakEvent listener registered on " + priority.name());
 	}
 
 	private void startSaveTask() {
-		if (savetask == null) {
-			getLogger().info("Saving all players every " + saveInterval + " minutes");
-			savetask = getServer().getScheduler().runTaskTimerAsynchronously(
-					this, new IntervalSaveTask(this), 1L,
-					((20L * 60L) * saveInterval));
-		} else {
+		if (savetask != null) {
 			savetask.cancel();
 			savetask = null;
-			getLogger().info(
-					"Saving all players every " + saveInterval + " minutes");
-			savetask = getServer().getScheduler().runTaskTimerAsynchronously(
-					this, new IntervalSaveTask(this), 1L,
-					((20L * 60L) * saveInterval));
 		}
-
+		getLogger().info("Saving all players every " + saveInterval + " minutes");
+		savetask = getServer().getScheduler().runTaskTimerAsynchronously(
+				this, new IntervalSaveTask(this), 1L,
+				((20L * 60L) * saveInterval));
 	}
 
 	private void stopSaveTask() {
@@ -231,19 +220,14 @@ public class EZBlocks extends JavaPlugin {
 	}
 
 	public int getBlocksBroken(Player p) {
-		if (BreakHandler.breaks != null
-				&& BreakHandler.breaks.containsKey(p.getUniqueId().toString())) {
-			return BreakHandler.breaks.get(p.getUniqueId().toString());
-		} else {
-			return 0;
-		}
-
+		Integer v = BreakHandler.breaks.get(p.getUniqueId().toString());
+		return v == null ? 0 : v;
 	}
 
 	public static EZBlocks getEZBlocks() {
 		return ezblocks;
 	}
-	
+
 	public BreakHandler getBreakHandler() {
 		return breakHandler;
 	}
