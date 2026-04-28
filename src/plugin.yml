@@ -1,6 +1,7 @@
 name: EZBlocks
 main: me.clip.ezblocks.EZBlocks
-version: 1.6.0
+version: 1.7.0
+api-version: "1.13"
 author: extended_clip
 description: Count players blocks broken
 softdepend: [TokenEnchant, AutoSell]
@@ -15,7 +16,6 @@ permissions:
         description: access to admin commands
         default: op
 commands:
-   ezblocks:
-     description: EZBlocks main command
-     aliases: [blocks]
-     
+    blocks:
+        description: EZBlocks main command
+        aliases: [ezblocks]

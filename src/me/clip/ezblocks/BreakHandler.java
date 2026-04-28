@@ -1,8 +1,8 @@
 package me.clip.ezblocks;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 import me.clip.ezblocks.tasks.LoadTask;
 import me.clip.ezblocks.tasks.PlayerSaveTask;
@@ -18,13 +18,14 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.inventory.meta.ItemMeta;
 
 public class BreakHandler implements Listener {
 
 	EZBlocks plugin;
 
-	public static HashMap<String, Integer> breaks = new HashMap<String, Integer>();
+	public static ConcurrentHashMap<String, Integer> breaks = new ConcurrentHashMap<String, Integer>();
 
 	public BreakHandler(EZBlocks i) {
 		plugin = i;
@@ -43,139 +44,123 @@ public class BreakHandler implements Listener {
 
 		String uuid = e.getPlayer().getUniqueId().toString();
 
-		if (breaks.containsKey(uuid)) {
-			plugin.getServer().getScheduler().runTaskAsynchronously(plugin, new PlayerSaveTask(plugin, uuid, breaks.get(uuid)));
-			breaks.remove(uuid);
+		Integer broken = breaks.remove(uuid);
+		if (broken != null) {
+			plugin.getServer().getScheduler().runTaskAsynchronously(plugin, new PlayerSaveTask(plugin, uuid, broken));
 		}
 	}
-	
+
 	private boolean isAllowedBlock(Material m) {
-		
-		if (EZBlocks.options.getBlacklistedBlocks() == null 
+
+		if (EZBlocks.options.getBlacklistedBlocks() == null
 				|| EZBlocks.options.getBlacklistedBlocks().isEmpty()) {
 			return true;
 		}
-		
+
 		if (EZBlocks.options.blacklistIsWhitelist()) {
-			if (!EZBlocks.options.getBlacklistedBlocks().contains(m.toString())) {
-				return false;
-			}
-		} else {
-			if (EZBlocks.options.getBlacklistedBlocks().contains(m.toString())) {
-				return false;
-			}
+			return EZBlocks.options.getBlacklistedBlocks().contains(m.toString());
 		}
-		
-		return true;
+		return !EZBlocks.options.getBlacklistedBlocks().contains(m.toString());
 	}
-	
+
 	private boolean isTool(ItemStack i) {
-		
-		return EZBlocks.options.getTrackedTools() != null 
+
+		return i != null
+				&& EZBlocks.options.getTrackedTools() != null
 				&& EZBlocks.options.getTrackedTools().contains(i.getType().name());
 	}
-	
+
 	private String getName(ItemStack i) {
-		String type = "";
 		switch (i.getType().name()) {
 		case "WOOD_PICKAXE":
 		case "WOODEN_PICKAXE":
-			type = "Wood Pickaxe";
-			break;
+			return "Wood Pickaxe";
 		case "STONE_PICKAXE":
-			type = "Stone Pickaxe";
-			break;
+			return "Stone Pickaxe";
 		case "IRON_PICKAXE":
-			type = "Iron Pickaxe";
-			break;
+			return "Iron Pickaxe";
 		case "GOLD_PICKAXE":
-			type = "Golden Pickaxe";
-			break;
+		case "GOLDEN_PICKAXE":
+			return "Golden Pickaxe";
 		case "DIAMOND_PICKAXE":
-			type = "Diamond Pickaxe";
-			break;
+			return "Diamond Pickaxe";
+		case "NETHERITE_PICKAXE":
+			return "Netherite Pickaxe";
 		case "WOOD_AXE":
 		case "WOODEN_AXE":
-			type = "Wood Axe";
-			break;
+			return "Wood Axe";
 		case "STONE_AXE":
-			type = "Stone Axe";
-			break;
+			return "Stone Axe";
 		case "IRON_AXE":
-			type = "Iron Axe";
-			break;
+			return "Iron Axe";
 		case "GOLD_AXE":
-			type = "Golden Axe";
-			break;
+		case "GOLDEN_AXE":
+			return "Golden Axe";
 		case "DIAMOND_AXE":
-			type = "Diamond Axe";
-			break;
+			return "Diamond Axe";
+		case "NETHERITE_AXE":
+			return "Netherite Axe";
 		case "WOOD_SPADE":
 		case "WOODEN_SHOVEL":
-			type = "Wood Spade";
-			break;
+			return "Wood Shovel";
 		case "STONE_SPADE":
 		case "STONE_SHOVEL":
-			type = "Stone Spade";
-			break;
+			return "Stone Shovel";
 		case "IRON_SPADE":
 		case "IRON_SHOVEL":
-			type = "Iron Spade";
-			break;
+			return "Iron Shovel";
 		case "GOLD_SPADE":
 		case "GOLDEN_SHOVEL":
-			type = "Golden Spade";
-			break;
+			return "Golden Shovel";
 		case "DIAMOND_SPADE":
 		case "DIAMOND_SHOVEL":
-			type = "Diamond Spade";
-			break;
-		}
-		
-		if (type.equals("")) {
+			return "Diamond Shovel";
+		case "NETHERITE_SHOVEL":
+			return "Netherite Shovel";
+		default:
 			return i.getType().name();
 		}
-		
-		return type;
 	}
-	
-	@SuppressWarnings("deprecation")
+
 	public boolean check(Player p, Block b) {
+		if (b == null || b.getType() == Material.AIR) {
+			return false;
+		}
+
 		if (!isAllowedBlock(b.getType())) {
 			return false;
 		}
-		
-		ItemStack i = p.getItemInHand();
-		
+
+		ItemStack i = p.getInventory().getItemInMainHand();
+
 		if (i == null) {
 			return false;
 		}
-		
+
 		if (!isTool(i)) {
 			return false;
 		}
-		
+
 		if (EZBlocks.options.survivalOnly() && !p.getGameMode().equals(GameMode.SURVIVAL)) {
 			return false;
 		}
-		
+
 		if (!EZBlocks.options.getEnabledWorlds().contains(p.getWorld().getName())
 				&& !EZBlocks.options.getEnabledWorlds().contains("all")) {
 			return false;
 		}
-			
+
 		if (EZBlocks.options.onlyBelowY()
 				&& b.getLocation().getBlockY() > EZBlocks.options.getBelowYCoord()) {
 			return false;
 		}
-		
+
 		return true;
 	}
 
-	@SuppressWarnings("deprecation")
 	public void handleBlockBreakEvent(final Player p, final Block block) {
 
-		ItemStack i = p.getItemInHand();
+		ItemStack i = p.getInventory().getItemInMainHand();
 
 		String uuid = p.getUniqueId().toString();
 
@@ -205,7 +190,11 @@ public class BreakHandler implements Listener {
 
 		if (EZBlocks.options.pickaxeNeverBreaks()) {
 
-			i.setDurability((short) 0);
+			ItemMeta meta = i.getItemMeta();
+			if (meta instanceof Damageable) {
+				((Damageable) meta).setDamage(0);
+				i.setItemMeta(meta);
+			}
 		}
 
 		if (EZBlocks.options.usePickCounter()
@@ -215,27 +204,30 @@ public class BreakHandler implements Listener {
 		}
 
 	}
-	
+
 	private void handlePickCounter(Player p, ItemStack i) {
-		
+
 		String format = ChatColor.translateAlternateColorCodes('&', EZBlocks.options.getPickCounterFormat());
 		int one = format.indexOf('%');
 		int two = format.lastIndexOf('%');
 		String first = format.substring(0, one);
 		String second = format.substring(two+1);
-		
+
 		ItemMeta meta = i.getItemMeta();
-		
+		if (meta == null) {
+			return;
+		}
+
 		if (EZBlocks.options.usePickCounterDisplayName()) {
-			
+
 			int breaks = 1;
-			
-			if (i.hasItemMeta() && i.getItemMeta().hasDisplayName()) {
-				
-				String displayName = i.getItemMeta().getDisplayName();
-				
+
+			if (meta.hasDisplayName()) {
+
+				String displayName = meta.getDisplayName();
+
 				if (displayName.startsWith(first) && displayName.endsWith(second)) {
-					
+
 					String f = displayName.replace(first, "");
 					f = f.replace(second, "").trim();
 					int amt = getInt(f);
@@ -244,10 +236,10 @@ public class BreakHandler implements Listener {
 					i.setItemMeta(meta);
 					plugin.rewards.givePickaxeReward(p, breaks);
 					plugin.rewards.givePickaxeIntervalReward(p, breaks);
-					
+
 				} else if (displayName.contains(" "+first) && displayName.endsWith(second)) {
-					
-					int split = displayName.indexOf(first, 0);					
+
+					int split = displayName.indexOf(first, 0);
 					String name = displayName.substring(0, split);
 					String f = displayName.substring(split);
 					f = f.replace(first, "");
@@ -259,19 +251,19 @@ public class BreakHandler implements Listener {
 					i.setItemMeta(meta);
 					plugin.rewards.givePickaxeReward(p, breaks);
 					plugin.rewards.givePickaxeIntervalReward(p, breaks);
-					
+
 				} else {
-					
-					meta.setDisplayName(displayName+" "+format.replace("%blocks%", "1"));		
-					i.setItemMeta(meta);	
+
+					meta.setDisplayName(displayName+" "+format.replace("%blocks%", "1"));
+					i.setItemMeta(meta);
 					plugin.rewards.givePickaxeReward(p, 1);
 					plugin.rewards.givePickaxeIntervalReward(p, 1);
 				}
-				
+
 			} else {
-				
+
 				String type = getName(i);
-				
+
 				meta.setDisplayName(type+" "+format.replace("%blocks%", "1"));
 				i.setItemMeta(meta);
 				plugin.rewards.givePickaxeReward(p, 1);
@@ -279,68 +271,67 @@ public class BreakHandler implements Listener {
 			}
 
 		} else {
-			
-			if (i.hasItemMeta() && i.getItemMeta().hasLore()) {
-								
+
+			if (meta.hasLore()) {
+
 				int breaks = 0;
 				boolean contains = false;
 				List<String> lore = meta.getLore();
 				List<String> newLore = new ArrayList<String>();
-				
+
 				for (String line : lore) {
-					
+
 					if (line.startsWith(first) && line.endsWith(second)) {
-						
+
 						contains = true;
 						String amount = line.replace(first, "").replace(second, "");
-							
+
 						breaks = getInt(amount);
-					
+
 						newLore.add(format.replace("%blocks%", String.valueOf(breaks+1)));
-					
+
 					} else {
-						
+
 						newLore.add(line);
 					}
 				}
-				
+
 				if (!contains) {
-					
+
 					newLore.add(format.replace("%blocks%", "1"));
 				}
-				
+
 				meta.setLore(newLore);
 				i.setItemMeta(meta);
-				plugin.rewards.givePickaxeReward(p, breaks);
-				plugin.rewards.givePickaxeIntervalReward(p, breaks);
-				
+				plugin.rewards.givePickaxeReward(p, breaks+1);
+				plugin.rewards.givePickaxeIntervalReward(p, breaks+1);
+
 			} else {
-				
+
 				List<String> lore = new ArrayList<String>();
 				lore.add(format.replace("%blocks%", "1"));
 				meta.setLore(lore);
 				i.setItemMeta(meta);
 				plugin.rewards.givePickaxeReward(p, 1);
 				plugin.rewards.givePickaxeIntervalReward(p, 1);
-				
+
 			}
 		}
 	}
 
 	public int getInt(String s) {
 		try {
-			int i = Integer.parseInt(s);
-			return i;
-		} catch (Exception e) {
+			return Integer.parseInt(s);
+		} catch (NumberFormatException e) {
 			return 0;
 		}
 	}
-	
+
 	public boolean isInt(String s) {
 		try {
 			Integer.parseInt(s);
 			return true;
-		} catch (Exception e) {
+		} catch (NumberFormatException e) {
 			return false;
 		}
 	}
