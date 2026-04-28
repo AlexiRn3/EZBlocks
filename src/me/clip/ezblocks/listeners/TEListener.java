@@ -2,6 +2,8 @@ package me.clip.ezblocks.listeners;
 
 import java.lang.reflect.Method;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Logger;
 
 import me.clip.ezblocks.EZBlocks;
@@ -40,6 +42,9 @@ public class TEListener implements Listener {
 		"com.vk2gpz.tokenenchant.api.event.TEBlockExplodeEvent",
 		"com.vk2gpz.tokenenchant.event.MultiBlockExplodeEvent"
 	};
+
+	/** First time we see an explosion fired by a given enchant, log it. */
+	private final Set<String> seenEnchants = ConcurrentHashMap.newKeySet();
 
 	private final EZBlocks plugin;
 
@@ -100,6 +105,11 @@ public class TEListener implements Listener {
 		Player player = invokePlayer(event);
 		if (player == null) {
 			return;
+		}
+
+		String enchant = invokeEnchantName(event);
+		if (enchant != null && seenEnchants.add(enchant)) {
+			LOG.info("[EZBlocks] First multi-block break seen from TE enchant: " + enchant);
 		}
 
 		List<Block> blocks = invokeBlockList(event);
@@ -175,6 +185,28 @@ public class TEListener implements Listener {
 				return (Block) out;
 			}
 		} catch (Exception ignored) {
+		}
+		return null;
+	}
+
+	private static String invokeEnchantName(Event event) {
+		// TokenEnchant exposes the triggering enchant under a few different
+		// names depending on version. Try each.
+		String[] candidates = {"getEnchantName", "getEnchant", "getName"};
+		for (String name : candidates) {
+			try {
+				Method m = event.getClass().getMethod(name);
+				Object out = m.invoke(event);
+				if (out instanceof String) {
+					return (String) out;
+				}
+				if (out != null) {
+					return out.toString();
+				}
+			} catch (NoSuchMethodException ignored) {
+			} catch (Exception ignored) {
+				return null;
+			}
 		}
 		return null;
 	}
